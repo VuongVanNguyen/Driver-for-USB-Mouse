@@ -45,7 +45,56 @@ Chuột ──USB──► Raspberry Pi: usbcore
 - Parser HID report descriptor đầy đủ (report protocol). Driver chỉ dùng boot protocol.
 - Chuột không dây có dongle đa chức năng, chuột gaming nhiều interface.
 
-## 3. Cấu trúc thư mục
+## 3. Một driver chuột USB cần có những gì
+
+Hình dung driver như **nhân viên trung gian** ngồi giữa *chuột* (phần cứng) và
+*hệ điều hành* (con trỏ trên màn hình). Để làm xong việc đó, nó cần 6 bộ phận.
+Mỗi bộ phận nằm ở một file trong `src/` (xem bảng "Chức năng từng file" ở mục 4).
+
+1. **Tấm bảng "tôi nhận loại chuột nào" — `id_table`.**
+   Khi cắm thiết bị USB, `usbcore` hỏi mọi driver: *"đứa nào nhận cái này?"*. Driver
+   đưa bảng mô tả *HID class / boot subclass / mouse protocol*; khớp thì nhân gọi vào.
+   → `usb_mouse_main.c`.
+
+2. **Thủ tục "nhận việc" — `probe()`.**
+   Khi chuột được giao cho driver: cấp vùng nhớ đệm (**buffer DMA**) để chuột đổ dữ
+   liệu vào; tạo **URB** (USB Request Block — "phiếu yêu cầu" gửi nhân: *hễ chuột có
+   tin thì báo tôi*); rồi đăng ký input device (bộ phận 3). → `usb_mouse_probe.c`.
+
+3. **Khai báo "tôi biết làm gì" — `input_dev` + capability.**
+   Nói với **Input Subsystem**: *thiết bị này có 3 nút (trái/phải/giữa) và biết di
+   chuyển X, Y, lăn bánh xe* — set `EV_KEY`, `EV_REL`. Không khai thì dù chuột gửi
+   dữ liệu, hệ điều hành cũng bỏ qua. → `usb_mouse_input.c`.
+
+4. **Người đưa tin — vòng lặp URB (phần quan trọng nhất).**
+   Chuột tự động gửi báo cáo mỗi khi di/bấm (qua *interrupt endpoint*, vài ms/lần).
+   Mỗi lần có dữ liệu, nhân gọi callback `usb_mouse_irq()`: đọc buffer (byte 0 = nút,
+   byte 1 = ΔX, byte 2 = ΔY, byte 3 = bánh xe), dịch thành sự kiện
+   `input_report_key/rel(...)` + `input_sync()`, rồi **nộp lại URB** để nhận tiếp
+   (quên bước này thì chuột gửi đúng 1 lần rồi "đơ"). → `usb_mouse_irq.c`.
+
+5. **Công tắc bật/tắt + dọn dẹp — `open/close` và `disconnect()`.**
+   `open()`/`close()`: chỉ chạy URB khi có ứng dụng (evtest, desktop) mở thiết bị,
+   đóng thì tắt — khỏi tốn CPU (→ `usb_mouse_input.c`). `disconnect()`: khi rút chuột,
+   trả lại mọi thứ đã mượn **đúng thứ tự** (dừng URB → free URB → free buffer → gỡ
+   input device); sai thứ tự = kernel oops (→ `usb_mouse_probe.c`).
+
+6. **Thủ tục bắt buộc của mọi module.**
+   `module_init`/`module_exit` (điểm vào/ra khi `insmod`/`rmmod`) và các macro
+   `MODULE_LICENSE("GPL")`, `MODULE_AUTHOR`, `MODULE_DESCRIPTION`,
+   `MODULE_DEVICE_TABLE(usb, ...)`. → `usb_mouse_main.c`.
+
+Vòng đời một con chuột, từ lúc cắm tới lúc rút:
+
+```
+Cắm chuột → id_table khớp → probe() xin tài nguyên → tạo input_dev
+   → app mở thiết bị → open() bật URB
+      → [chuột gửi tin → usb_mouse_irq() dịch & báo → resubmit URB]   (lặp lại)
+   → app đóng → close() tắt URB
+Rút chuột → disconnect() dọn dẹp đúng thứ tự
+```
+
+## 4. Cấu trúc thư mục
 
 ```
 usb_mouse_driver/
@@ -79,6 +128,23 @@ usb_mouse_driver/
 Cách chia file bám theo các phần của một USB driver (khởi tạo, probe, truyền dữ liệu,
 ngắt kết nối), nên mỗi thành viên có thể nhận một file mà ít đụng nhau.
 
+### Chức năng từng file đối với driver
+
+| File | Lo phần nào của driver (xem mục 3) | Hàm chính |
+|---|---|---|
+| `src/usb_mouse.h` | "Hợp đồng" chung: `struct usb_mouse` (trạng thái 1 con chuột), hằng số (tên driver, bit nút, độ dài buffer), prototype các hàm non-static. Đổi file này phải báo cả nhóm. | — |
+| `src/usb_mouse_main.c` | Bộ phận 1 + 6: khung module, `struct usb_driver`, `id_table`, `module_param`. | `module_init`, `module_exit` |
+| `src/usb_mouse_probe.c` | Bộ phận 2 + phần dọn dẹp của 5: cấp phát `struct usb_mouse` + URB + buffer DMA lúc cắm, giải phóng đúng thứ tự lúc rút. | `usb_mouse_probe()`, `usb_mouse_disconnect()` |
+| `src/usb_mouse_input.c` | Bộ phận 3 + công tắc của 5: tạo & cấu hình `input_dev` (capability, name/phys/id), `open()`/`close()` bật-tắt URB. | `usb_mouse_input_init()`, `open`, `close` |
+| `src/usb_mouse_irq.c` | Bộ phận 4 (trái tim truyền dữ liệu): callback URB parse báo cáo → sự kiện input, resubmit URB. | `usb_mouse_irq()` |
+| `src/usb_mouse_sysfs.c` | (Mở rộng) thuộc tính sysfs đổi cấu hình lúc chạy, thống kê số click/gói tin. | — |
+| `tools/event_reader.c` | **Userspace**, không thuộc module: đọc `/dev/input/eventX` in sự kiện dễ đọc để demo. Biên dịch bằng gcc thường, không include `usb_mouse.h`. | `main` |
+
+Thứ tự viết: **chốt `usb_mouse.h` trước** (cả nhóm duyệt), rồi để stub rỗng cho từng
+hàm để module luôn build/link được, sau đó ba file `main` / `probe`+`input` / `irq`
+viết **song song** được vì chỉ "gặp" nhau qua prototype trong header. `sysfs.c` và
+`event_reader.c` làm sau cùng.
+
 ### Kbuild (dự kiến)
 ```make
 obj-m := usb_mouse.o
@@ -93,9 +159,9 @@ Trong `Makefile` dùng `KDIR ?= /lib/modules/$(shell uname -r)/build`. Biến n�
   Đường dẫn sysfs sẽ là `/sys/bus/usb/drivers/usb_mouse_drv/`. Báo cáo mẫu bị lệch giữa hai tên này, nhóm không lặp lại lỗi đó.
 - Mọi symbol không `static` phải có tiền tố `usb_mouse_`.
 
-## 4. Môi trường và quy trình làm việc
+## 5. Môi trường và quy trình làm việc
 
-### 4.1 Mô hình: viết code trên WSL, build và test trên Pi
+### 5.1 Mô hình: viết code trên WSL, build và test trên Pi
 
 | Việc | Ở đâu | Ghi chú |
 |---|---|---|
@@ -110,7 +176,7 @@ Viết nhiều rồi mới build sẽ ra một loạt lỗi khó dò.
 Cách khác cũng được: dùng extension **Remote-SSH** của VS Code để mở thẳng thư mục dự án trên Pi,
 sửa và build ngay ở đó. Khi làm vậy, nhớ commit/push từ Pi để không lệch với bản trên WSL.
 
-### 4.2 Chuẩn bị Pi (một lần)
+### 5.2 Chuẩn bị Pi (một lần)
 - Dùng **Raspberry Pi OS 64-bit**, bản Bookworm trở lên. Bản 32-bit trên Pi 4/5 có thể boot kernel 64-bit,
   khi đó build module bị lệch kiến trúc.
 - Bật SSH (trong Raspberry Pi Imager hoặc `sudo raspi-config` → Interface Options → SSH).
@@ -123,7 +189,7 @@ sửa và build ngay ở đó. Khi làm vậy, nhớ commit/push từ Pi để k
   ```
 - Model Pi, phiên bản OS và `uname -r` của nhóm: _(điền sau khi có máy)_.
 
-### 4.3 Đồng bộ code WSL → Pi
+### 5.3 Đồng bộ code WSL → Pi
 - **Chính thức:** dùng git với một remote chung (GitHub/GitLab). Trên WSL `git push`, trên Pi `git pull`.
 - **Build thử nhanh** (chưa muốn commit): `PI_HOST=<user>@<ip-của-pi> scripts/sync_to_pi.sh`.
   Script rsync code (bỏ các file trong `.gitignore`) sang `~/usb_mouse_driver` trên Pi rồi chạy `make` qua SSH.
@@ -131,7 +197,7 @@ sửa và build ngay ở đó. Khi làm vậy, nhớ commit/push từ Pi để k
   - Raspberry Pi OS mới không còn user mặc định `pi`. Dùng user đã tạo lúc cài OS.
   - Cài SSH key (`ssh-copy-id <user>@<ip>`) để khỏi nhập mật khẩu mỗi lần.
 
-### 4.4 Build, nạp, test trên Pi
+### 5.4 Build, nạp, test trên Pi
 ```bash
 make                                  # build ra usb_mouse.ko
 lsusb                                 # thấy chuột, ghi lại VID:PID
@@ -150,7 +216,7 @@ make unload                           # rmmod, trả interface về usbhid
   Kiểm tra: nếu `/sys/module/usbhid/initstate` không tồn tại thì `usbhid` là built-in.
 - **Luôn thao tác qua SSH.** Khi unbind chuột hoặc driver lỗi, Pi mất chuột. Nếu kernel oops thì phải reboot Pi.
 
-### 4.5 Có cần mua màn hình rời cho Pi không? — **Không bắt buộc**
+### 5.5 Có cần mua màn hình rời cho Pi không? — **Không bắt buộc**
 
 | Mục đích | Cách làm | Cần màn hình? |
 |---|---|---|
@@ -162,7 +228,7 @@ make unload                           # rmmod, trả interface về usbhid
 > nên người xem sẽ không phân biệt được con trỏ do chuột USB (qua driver nhóm) hay do VNC di chuyển.
 > Bằng chứng chắc chắn nhất là `evtest` cho thấy sự kiện đến từ input device do `usb_mouse_drv` tạo ra.
 
-## 5. Quy ước code
+## 6. Quy ước code
 
 - Theo **Linux kernel coding style**: tab 8 cột, dòng ≤ 100 ký tự, `/* */` cho comment nhiều dòng.
   Trước khi commit chạy `checkpatch.pl --no-tree -f src/*.c`. Script này lấy từ thư mục `scripts/` của source kernel
@@ -176,7 +242,7 @@ make unload                           # rmmod, trả interface về usbhid
 - `MODULE_LICENSE("GPL")`, `MODULE_AUTHOR`, `MODULE_DESCRIPTION`, `MODULE_DEVICE_TABLE(usb, ...)`.
 - Comment trong code có thể viết tiếng Việt, nhưng tên biến và hàm viết tiếng Anh.
 
-## 6. Lỗi trong báo cáo mẫu cần tránh
+## 7. Lỗi trong báo cáo mẫu cần tránh
 
 Báo cáo tham khảo (`docs/reference/`) có code **không build được hoặc sai**. Nhóm **không copy nguyên văn**:
 
@@ -197,7 +263,7 @@ Báo cáo tham khảo (`docs/reference/`) có code **không build được hoặ
 Tham khảo code chuẩn: `drivers/hid/usbhid/usbmouse.c` của **đúng phiên bản kernel trên Pi**
 (xem trên https://elixir.bootlin.com hoặc repo `raspberrypi/linux`).
 
-## 7. Định dạng báo cáo boot protocol của chuột
+## 8. Định dạng báo cáo boot protocol của chuột
 
 | Byte | Ý nghĩa |
 |---|---|
@@ -208,7 +274,7 @@ Tham khảo code chuẩn: `drivers/hid/usbhid/usbmouse.c` của **đúng phiên 
 
 Buffer nhận tối đa 8 byte. Phải kiểm tra `urb->actual_length` trước khi đọc byte 3.
 
-## 8. Quy trình Git của nhóm
+## 9. Quy trình Git của nhóm
 
 Remote: https://github.com/VuongVanNguyen/Driver-for-USB-Mouse
 
@@ -256,7 +322,7 @@ và tách thành PR riêng, nhỏ, merge sớm để người khác cập nhật
 ### Không commit
 File build (`*.o`, `*.ko`...) đã có trong `.gitignore`. Không commit mật khẩu, token, IP của Pi hay file báo cáo nháp quá lớn.
 
-## 9. Ghi chú cho Claude Code
+## 10. Ghi chú cho Claude Code
 - Claude chạy trên **WSL**, nơi không có headers khớp kernel. **Không chạy `make` module trên WSL.**
   Việc build và test diễn ra trên Pi; trên WSL chỉ soạn code và kiểm tra bằng mắt hoặc review.
 - Không tự chạy `insmod`, `rmmod`, `ssh` sang Pi hay ghi vào `/sys/bus/usb/...` khi chưa được yêu cầu.
