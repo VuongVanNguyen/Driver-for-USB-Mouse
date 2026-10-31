@@ -208,7 +208,55 @@ Tham khảo code chuẩn: `drivers/hid/usbhid/usbmouse.c` của **đúng phiên 
 
 Buffer nhận tối đa 8 byte. Phải kiểm tra `urb->actual_length` trước khi đọc byte 3.
 
-## 8. Ghi chú cho Claude Code
+## 8. Quy trình Git của nhóm
+
+Remote: https://github.com/VuongVanNguyen/Driver-for-USB-Mouse
+
+**Quy tắc:** không ai commit thẳng vào `main`. Mỗi việc làm trên một nhánh riêng, merge qua Pull Request (PR).
+`main` lúc nào cũng phải build được trên Pi.
+
+### Mỗi lần bắt đầu một việc
+```bash
+git switch main
+git pull                                  # lấy code mới nhất của cả nhóm
+git switch -c feature/probe               # tạo nhánh, đặt tên theo việc
+```
+Tên nhánh: `feature/<việc>` (probe, input, irq, sysfs...), `fix/<lỗi>`, `docs/<nội dung>`.
+
+### Trong lúc làm
+```bash
+PI_HOST=<user>@<ip> scripts/sync_to_pi.sh # build thử trên Pi thường xuyên
+git status                                # xem file nào đã đổi
+git diff                                  # xem chi tiết thay đổi
+git add src/usb_mouse_probe.c             # chọn file cần commit (tránh "git add ." bừa)
+git commit -m "probe: cấp phát URB và buffer DMA"
+```
+- Commit nhỏ, mỗi commit một ý. Message viết theo dạng `<phần>: <làm gì>`, ví dụ `irq: xử lý byte wheel`.
+- Chỉ commit khi code **build được trên Pi** (hoặc ghi rõ `WIP` nếu cần lưu tạm).
+
+### Khi xong việc
+```bash
+git push -u origin feature/probe          # lần đầu đẩy nhánh; các lần sau chỉ cần git push
+```
+1. Lên GitHub, bấm **Compare & pull request** để tạo PR vào `main`.
+   Ghi vào PR: làm gì, đã test trên Pi thế nào (kèm log `dmesg` hoặc `evtest` nếu có).
+2. Ít nhất **một thành viên khác** đọc và approve.
+3. Bấm **Merge**, rồi xóa nhánh trên GitHub.
+4. Về máy: `git switch main && git pull`, xóa nhánh cũ bằng `git branch -d feature/probe`.
+
+### Khi `main` đã có code mới trong lúc mình đang làm
+```bash
+git switch main && git pull
+git switch feature/probe
+git merge main                            # có conflict thì sửa file, git add, git commit
+```
+`src/usb_mouse.h` là file dùng chung. Muốn đổi struct hoặc prototype thì báo cả nhóm trước,
+và tách thành PR riêng, nhỏ, merge sớm để người khác cập nhật theo.
+
+### Không commit
+File build (`*.o`, `*.ko`...) đã có trong `.gitignore`. Không commit mật khẩu, token, IP của Pi hay file báo cáo nháp quá lớn.
+
+## 9. Ghi chú cho Claude Code
 - Claude chạy trên **WSL**, nơi không có headers khớp kernel. **Không chạy `make` module trên WSL.**
   Việc build và test diễn ra trên Pi; trên WSL chỉ soạn code và kiểm tra bằng mắt hoặc review.
 - Không tự chạy `insmod`, `rmmod`, `ssh` sang Pi hay ghi vào `/sys/bus/usb/...` khi chưa được yêu cầu.
