@@ -1,0 +1,17 @@
+# Sản phẩm build kernel module
+*.o
+*.ko
+*.mod
+*.mod.c
+*.cmd
+*.symvers
+*.order
+.tmp_versions/
+.cache.mk
+
+# Userspace tools
+tools/event_reader
+
+# Editor
+.vscode/
+*.swp
