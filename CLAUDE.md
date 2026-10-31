@@ -260,5 +260,7 @@ File build (`*.o`, `*.ko`...) đã có trong `.gitignore`. Không commit mật k
 - Claude chạy trên **WSL**, nơi không có headers khớp kernel. **Không chạy `make` module trên WSL.**
   Việc build và test diễn ra trên Pi; trên WSL chỉ soạn code và kiểm tra bằng mắt hoặc review.
 - Không tự chạy `insmod`, `rmmod`, `ssh` sang Pi hay ghi vào `/sys/bus/usb/...` khi chưa được yêu cầu.
+- **Không thêm dòng `Co-Authored-By: Claude ...`** (hay bất kỳ dòng ghi công Claude nào) vào commit message
+  hoặc mô tả PR. Nhóm không muốn Claude xuất hiện trong danh sách contributors.
 - Khi viết hoặc sửa code, đối chiếu với `drivers/hid/usbhid/usbmouse.c` cùng phiên bản kernel đang chạy trên Pi.
   Chú ý API thay đổi theo phiên bản, ví dụ `usb_maxpacket()` chỉ còn 2 tham số từ 5.19.
