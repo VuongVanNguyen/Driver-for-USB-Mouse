@@ -31,7 +31,26 @@ struct usb_mouse {
 	struct urb *irq;		/* URB interrupt IN, submit lại sau mỗi lần nhận */
 	signed char *data;		/* buffer DMA nhận báo cáo, USB_MOUSE_BUF_LEN byte */
 	dma_addr_t data_dma;
+
+	/* Cấu hình, đổi lúc chạy qua sysfs. irq đọc bằng READ_ONCE() */
+	bool swap_buttons;		/* đổi nút trái/phải */
+	bool invert_y;			/* đảo trục Y */
+	int sensitivity;		/* phần trăm, 100 = giữ nguyên, 0 = chưa khởi tạo */
+
+	/* Thống kê và trạng thái, chỉ callback irq ghi */
+	unsigned long packets;		/* số gói hợp lệ */
+	unsigned long clicks;		/* số lần nhấn nút (cạnh lên) */
+	unsigned long errors;		/* số gói URB lỗi */
+	u8 last_buttons;		/* trạng thái nút của gói trước, để đếm click */
+	int rem_x, rem_y;		/* phần dư khi nhân độ nhạy, tránh mất chuyển động nhỏ */
 };
+
+#define USB_MOUSE_SENS_MIN	10
+#define USB_MOUSE_SENS_MAX	500
+#define USB_MOUSE_SENS_DEFAULT	100
+
+/* usb_mouse_sysfs.c: truyền vào .dev_groups của usb_driver */
+extern const struct attribute_group *usb_mouse_groups[];
 
 /* usb_mouse_probe.c */
 int usb_mouse_probe(struct usb_interface *intf, const struct usb_device_id *id);
