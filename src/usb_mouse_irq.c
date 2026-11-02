@@ -6,6 +6,7 @@
  */
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
+#include <linux/bitops.h>	/* hweight8() */
 #include <linux/input.h>
 #include <linux/usb.h>
 

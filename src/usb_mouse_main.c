@@ -23,9 +23,25 @@ static struct usb_driver usb_mouse_driver = {
 	.probe		= usb_mouse_probe,
 	.disconnect	= usb_mouse_disconnect,
 	.id_table	= usb_mouse_id_table,
+	.dev_groups	= usb_mouse_groups,	/* sysfs: usb_mouse_sysfs.c */
 };
 
-/* TODO (mở rộng): module_param swap_buttons, invert_y, sensitivity */
+/*
+ * Giá trị mặc định đặt lúc nạp module; probe() chép vào từng struct usb_mouse.
+ * Đổi lúc chạy cho một con chuột cụ thể thì dùng sysfs (usb_mouse_sysfs.c).
+ */
+bool usb_mouse_swap_buttons;
+module_param_named(swap_buttons, usb_mouse_swap_buttons, bool, 0644);
+MODULE_PARM_DESC(swap_buttons, "Đổi nút trái/phải (mặc định: tắt)");
+
+bool usb_mouse_invert_y;
+module_param_named(invert_y, usb_mouse_invert_y, bool, 0644);
+MODULE_PARM_DESC(invert_y, "Đảo trục Y (mặc định: tắt)");
+
+int usb_mouse_sensitivity = USB_MOUSE_SENS_DEFAULT;
+module_param_named(sensitivity, usb_mouse_sensitivity, int, 0644);
+MODULE_PARM_DESC(sensitivity,
+		 "Độ nhạy phần trăm, kẹp về 10..500 (mặc định 100)");
 
 static int __init usb_mouse_init(void)
 {
@@ -50,6 +66,6 @@ static void __exit usb_mouse_exit(void)
 module_init(usb_mouse_init);
 module_exit(usb_mouse_exit);
 
-MODULE_AUTHOR("TODO: tên nhóm");
+MODULE_AUTHOR("Vuong-Thien-Hoang");
 MODULE_DESCRIPTION("USB boot-protocol mouse driver (HUST OS project)");
 MODULE_LICENSE("GPL");

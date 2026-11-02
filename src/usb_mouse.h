@@ -49,6 +49,13 @@ struct usb_mouse {
 #define USB_MOUSE_SENS_MAX	500
 #define USB_MOUSE_SENS_DEFAULT	100
 
+/* usb_mouse_main.c: giá trị mặc định đặt lúc nạp module (module_param);
+ * probe() chép vào từng struct usb_mouse khi cắm chuột.
+ */
+extern bool usb_mouse_swap_buttons;
+extern bool usb_mouse_invert_y;
+extern int usb_mouse_sensitivity;
+
 /* usb_mouse_sysfs.c: truyền vào .dev_groups của usb_driver */
 extern const struct attribute_group *usb_mouse_groups[];
 
